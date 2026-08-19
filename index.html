@@ -906,7 +906,7 @@
             window.showToast("Template Excel berhasil diunduh");
         }
 
-        window.handleExcelUpload = function(event) {
+window.handleExcelUpload = function(event) {
             const file = event.target.files[0];
             if (!file) return;
 
@@ -927,6 +927,65 @@
                     window.showToast("Format Excel salah. Wajib ada kolom NIS, Nama, Kelas.", "error");
                     return;
                 }
+
+                let importedStudents = [];
+                let importedClasses = new Set();
+
+                for (let i = 1; i < json.length; i++) {
+                    const row = json[i];
+                    if (!row || !row[nameIdx]) continue;
+                    
+                    const nis = String(row[nisIdx] || `N-${Math.floor(Math.random()*10000)}`).trim();
+                    const name = String(row[nameIdx]).trim();
+                    const className = String(row[classIdx] || 'Belum Ada Kelas').trim();
+
+                    importedClasses.add(className);
+                    importedStudents.push({
+                        id: `s_${Date.now()}_${i}`,
+                        nis: nis,
+                        name: name,
+                        className: className
+                    });
+                }
+
+                if(confirm(`Memproses ${importedStudents.length} siswa dan ${importedClasses.size} kelas dari file Excel. Lanjutkan sinkronisasi?`)) {
+                    document.getElementById('loading-screen').style.display = 'flex';
+                    document.getElementById('loading-screen').style.opacity = '1';
+                    
+                    try {
+                        if (db) {
+                            // Simpan daftar kelas satu per satu agar stabil
+                            for (const cName of importedClasses) {
+                                const cId = `c_${Date.now()}_${Math.random()}`;
+                                await setDoc(doc(db, `${appId}_classes`, cId), { name: cName });
+                            }
+
+                            // Simpan data siswa satu per satu ke database
+                            for (const s of importedStudents) {
+                                const docRef = doc(db, `${appId}_students`, s.id);
+                                await setDoc(docRef, s);
+                            }
+
+                            await loadDataFromFirebase();
+                        } else {
+                            state.classes = Array.from(importedClasses).map((c, i) => ({id: `c_${i}`, name: c}));
+                            state.students = importedStudents;
+                        }
+
+                        window.showToast("Import data berhasil disimpan ke sistem!");
+                        window.navigate('master');
+                    } catch (error) {
+                        console.error(error);
+                        window.showToast("Gagal mengimpor ke database", "error");
+                    }
+                    
+                    document.getElementById('loading-screen').style.opacity = '0';
+                    setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 300);
+                }
+                event.target.value = ''; 
+            };
+            reader.readAsArrayBuffer(file);
+        }
 
                 let importedStudents = [];
                 let importedClasses = new Set();
