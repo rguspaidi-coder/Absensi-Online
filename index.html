@@ -1006,22 +1006,57 @@
             `;
         }
 
-       // Bootstrapping App dengan Password
+// Bootstrapping App dengan Sistem Multi-Role
         window.onload = () => {
             // Sembunyikan aplikasi terlebih dahulu
             document.body.style.display = 'none';
 
-            // Munculkan pop-up password
-            const password = prompt("🔒 Masukkan Password Admin SMAN 1 BAB:");
+            // 1. Minta user memilih peran
+            const roleChoice = prompt("Pilih Akses Masuk:\nKetik '1' untuk ADMIN\nKetik '2' untuk GURU / PETUGAS");
 
-            // Cek apakah password benar
-            if (password === "sman1bab2026") {
-                // Jika benar, tampilkan aplikasi dan jalankan
+            let isAuthenticated = false;
+
+            // 2. Logika untuk ADMIN
+            if (roleChoice === "1") {
+                const adminPass = prompt("🔒 Masukkan Password ADMIN:");
+                if (adminPass === "sman1bab2026") {
+                    isAuthenticated = true;
+                    // Semua menu terbuka
+                } else {
+                    alert("❌ Password Admin Salah!");
+                }
+            } 
+            // 3. Logika untuk GURU
+            else if (roleChoice === "2") {
+                // Password guru dibedakan, misalnya "gurubab2026"
+                const guruPass = prompt("🔒 Masukkan Password GURU:");
+                if (guruPass === "gurubab2026") {
+                    isAuthenticated = true;
+                    
+                    // Sembunyikan menu Data Master dan Rekap agar guru tidak bisa mengubah data inti
+                    setTimeout(() => {
+                        document.getElementById('nav-master').style.display = 'none';
+                        document.getElementById('nav-rekap').style.display = 'none';
+                        
+                        // Ubah nama profil di kiri bawah (jika di desktop)
+                        const profileName = document.querySelector('.text-sm.font-semibold.text-white');
+                        if(profileName) profileName.textContent = 'Guru / Petugas';
+                        
+                        // Otomatis arahkan guru langsung ke halaman Absensi
+                        window.navigate('absensi');
+                    }, 500);
+                } else {
+                    alert("❌ Password Guru Salah!");
+                }
+            } else {
+                alert("Pilihan tidak valid.");
+            }
+
+            // 4. Tampilkan aplikasi jika berhasil, blokir jika gagal
+            if (isAuthenticated) {
                 document.body.style.display = 'flex';
                 initApp();
             } else {
-                // Jika salah atau dibatalkan
-                alert("❌ Password Salah! Akses ditolak.");
                 document.body.style.display = 'block';
                 document.body.style.backgroundColor = '#1e1b4b'; // Warna Navy SMAN 1
                 document.body.innerHTML = `
