@@ -1006,9 +1006,31 @@
             `;
         }
 
-        // Bootstrapping App
+       // Bootstrapping App dengan Password
         window.onload = () => {
-            initApp();
+            // Sembunyikan aplikasi terlebih dahulu
+            document.body.style.display = 'none';
+
+            // Munculkan pop-up password
+            const password = prompt("🔒 Masukkan Password Admin SMAN 1 BAB:");
+
+            // Cek apakah password benar
+            if (password === "sman1bab2026") {
+                // Jika benar, tampilkan aplikasi dan jalankan
+                document.body.style.display = 'flex';
+                initApp();
+            } else {
+                // Jika salah atau dibatalkan
+                alert("❌ Password Salah! Akses ditolak.");
+                document.body.style.display = 'block';
+                document.body.style.backgroundColor = '#1e1b4b'; // Warna Navy SMAN 1
+                document.body.innerHTML = `
+                    <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; height:100vh; color:white; font-family:'Poppins', sans-serif;">
+                        <h1 style="font-size:2rem; font-weight:bold; color:#ef4444; margin-bottom:10px;">🔒 Akses Ditolak</h1>
+                        <p style="color:#94a3b8;">Silakan muat ulang (refresh) halaman untuk mencoba lagi.</p>
+                    </div>
+                `;
+            }
         };
     </script>
 </body>
