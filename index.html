@@ -897,95 +897,113 @@
     }
 
     window.handleExcelUpload = function(event) {
-        const file = event.target.files[0];
-        if (!file) return;
+    const file = event.target.files[0];
+    if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async function(e) {
-            try {
-                const data = new Uint8Array(e.target.result);
-                const workbook = XLSX.read(data, {type: 'array'});
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
+    const reader = new FileReader();
+    reader.onload = async function(e) {
+        try {
+            const data = new Uint8Array(e.target.result);
+            const workbook = XLSX.read(data, {type: 'array'});
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
 
-                if (!json || json.length < 2) {
-                    window.showToast("File Excel kosong atau format tidak valid.", "error");
-                    return;
-                }
+            if (!json || json.length < 2) {
+                window.showToast("File Excel kosong atau format tidak valid.", "error");
+                return;
+            }
 
-                const headers = json[0].map(h => String(h || '').toLowerCase().trim());
-                const nisIdx = headers.indexOf('nis');
-                const nameIdx = headers.indexOf('nama');
-                const classIdx = headers.indexOf('kelas');
+            const headers = json[0].map(h => String(h || '').toLowerCase().trim());
+            const nisIdx = headers.indexOf('nis');
+            const nameIdx = headers.indexOf('nama');
+            const classIdx = headers.indexOf('kelas');
 
-                if (nisIdx === -1 || nameIdx === -1 || classIdx === -1) {
-                    window.showToast("Format Excel salah. Wajib ada kolom NIS, Nama, Kelas.", "error");
-                    return;
-                }
+            if (nisIdx === -1 || nameIdx === -1 || classIdx === -1) {
+                window.showToast("Format Excel salah. Wajib ada kolom NIS, Nama, Kelas.", "error");
+                return;
+            }
 
-                let importedStudents = [];
-                let importedClasses = new Set();
+            let importedStudents = [];
+            let importedClasses = new Set();
 
-                for (let i = 1; i < json.length; i++) {
-                    const row = json[i];
-                    if (!row || !row[nameIdx]) continue;
-                    
-                    const nis = String(row[nisIdx] || `N-${Math.floor(Math.random()*10000)}`).trim();
-                    const name = String(row[nameIdx]).trim();
-                    const className = String(row[classIdx] || 'Belum Ada Kelas').trim();
+            for (let i = 1; i < json.length; i++) {
+                const row = json[i];
+                if (!row || !row[nameIdx]) continue;
+                
+                const nis = String(row[nisIdx] || `N-${Math.floor(Math.random()*10000)}`).trim();
+                const name = String(row[nameIdx]).trim();
+                const className = String(row[classIdx] || 'Belum Ada Kelas').trim();
 
-                    importedClasses.add(className);
-                    importedStudents.push({
-                        id: `s_${Date.now()}_${i}`,
-                        nis: nis,
-                        name: name,
-                        className: className
-                    });
-                }
+                importedClasses.add(className);
+                importedStudents.push({
+                    id: `s_${Date.now()}_${i}`,
+                    nis: nis,
+                    name: name,
+                    className: className
+                });
+            }
 
-                if (importedStudents.length === 0) {
-                    window.showToast("Tidak ada data siswa yang valid ditemukan dalam file.", "error");
-                    return;
-                }
+            if (importedStudents.length === 0) {
+                window.showToast("Tidak ada data valid dalam file.", "error");
+                return;
+            }
 
-                if(confirm(`Memproses ${importedStudents.length} siswa dan ${importedClasses.size} kelas dari file Excel. Lanjutkan sinkronisasi?`)) {
-                    document.getElementById('loading-screen').style.display = 'flex';
-                    document.getElementById('loading-screen').style.opacity = '1';
-                    
-                    if (db) {
-                        // Simpan daftar kelas satu per satu
-                        for (const cName of importedClasses) {
-                            const cId = `c_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-                            await setDoc(doc(db, `${appId}_classes`, cId), { name: cName });
-                        }
+            if(confirm(`Memproses ${importedStudents.length} siswa. Lanjutkan?`)) {
+                document.getElementById('loading-screen').style.display = 'flex';
+                document.getElementById('loading-screen').style.opacity = '1';
+                
+                if (db) {
+                    // MENGGUNAKAN BATCH UNTUK UPLOAD MASSAL SUPER CEPAT
+                    let batch = writeBatch(db);
+                    let count = 0;
+                    const batchLimit = 400; // Batas aman pengiriman Firebase
 
-                        // Simpan data siswa satu per satu dengan penanganan error per item
-                        for (const s of importedStudents) {
-                            const docRef = doc(db, `${appId}_students`, s.id);
-                            await setDoc(docRef, s);
-                        }
-
-                        await loadDataFromFirebase();
-                    } else {
-                        state.classes = Array.from(importedClasses).map((c, i) => ({id: `c_${i}`, name: c}));
-                        state.students = importedStudents;
+                    // 1. Simpan daftar kelas
+                    for (const cName of importedClasses) {
+                        const cId = `c_${Date.now()}_${Math.floor(Math.random()*1000)}`;
+                        batch.set(doc(db, `${appId}_classes`, cId), { name: cName });
+                        count++;
                     }
 
-                    window.showToast("Import data berhasil disimpan ke sistem!");
-                    window.navigate('master');
+                    // 2. Simpan data siswa
+                    for (const s of importedStudents) {
+                        batch.set(doc(db, `${appId}_students`, s.id), s);
+                        count++;
+                        
+                        // Kirim jika "truk" sudah penuh, lalu buat truk baru
+                        if (count >= batchLimit) {
+                            await batch.commit();
+                            batch = writeBatch(db); 
+                            count = 0;
+                        }
+                    }
+                    
+                    // Kirim sisa data terakhir
+                    if (count > 0) {
+                        await batch.commit();
+                    }
+
+                    await loadDataFromFirebase(); // Tarik ulang data ke layar
+                } else {
+                    state.classes = Array.from(importedClasses).map((c, i) => ({id: `c_${i}`, name: c}));
+                    state.students = importedStudents;
                 }
-            } catch (err) {
-                console.error("Upload error:", err);
-                window.showToast("Gagal membaca file Excel atau gagal koneksi.", "error");
-            } finally {
-                document.getElementById('loading-screen').style.opacity = '0';
-                setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 300);
-                event.target.value = ''; 
+
+                window.showToast("Hore! Data Excel berhasil masuk ke sistem!");
+                window.navigate('master');
             }
-        };
-        reader.readAsArrayBuffer(file);
-    }
+        } catch (err) {
+            console.error("Upload error:", err);
+            window.showToast("Gagal menyimpan ke Firebase. Cek koneksi Anda.", "error");
+        } finally {
+            document.getElementById('loading-screen').style.opacity = '0';
+            setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 300);
+            event.target.value = ''; 
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
 
     function renderRekap(container) {
         container.innerHTML = `
