@@ -903,13 +903,9 @@ window.handleExcelUpload = function(event) {
     const reader = new FileReader();
     reader.onload = async function(e) {
         try {
-            // DETEKTIF 1: Cek apakah Excel bisa dibaca
-            alert("Langkah 1: Membaca isi file Excel...");
-
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
-            const firstSheetName = workbook.SheetNames[0];
-            const worksheet = workbook.Sheets[firstSheetName];
+            const worksheet = workbook.Sheets[workbook.SheetNames[0]];
             const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
 
             const headers = json[0].map(h => String(h || '').toLowerCase().trim());
@@ -918,13 +914,14 @@ window.handleExcelUpload = function(event) {
             const classIdx = headers.indexOf('kelas');
 
             if (nisIdx === -1 || nameIdx === -1 || classIdx === -1) {
-                alert("GAGAL: Nama kolom di Excel tidak sesuai (harus ada NIS, Nama, Kelas).");
+                alert("Format Excel salah. Wajib ada kolom NIS, Nama, Kelas.");
                 return;
             }
 
             let importedStudents = [];
             let importedClasses = new Set();
 
+            // Membaca baris per baris dari Excel
             for (let i = 1; i < json.length; i++) {
                 const row = json[i];
                 if (!row || !row[nameIdx]) continue;
@@ -942,53 +939,45 @@ window.handleExcelUpload = function(event) {
                 });
             }
 
-            if(confirm(`Langkah 2: Ditemukan ${importedStudents.length} siswa di Excel. Kirim ke server sekarang?`)) {
-                document.getElementById('loading-screen').style.display = 'flex';
-                document.getElementById('loading-screen').style.opacity = '1';
+            if(confirm(`Ditemukan ${importedStudents.length} siswa. Mulai proses sinkronisasi? (Proses ini menampilkan angka berjalan, tunggu sekitar 1 menit)`)) {
+                
+                const loadingScreen = document.getElementById('loading-screen');
+                const loadingTitle = loadingScreen.querySelector('h3');
+                const loadingText = loadingScreen.querySelector('p');
+                
+                loadingScreen.style.display = 'flex';
+                loadingScreen.style.opacity = '1';
                 
                 if (db) {
-                    alert("Langkah 3: Menyiapkan truk data untuk 1.000+ siswa... (Jika macet setelah pesan ini, berarti Firebase Anda menolak koneksi)");
+                    // 1. Simpan Daftar Kelas
+                    loadingTitle.innerText = "Menyiapkan Database...";
+                    loadingText.innerText = "Mendaftarkan daftar kelas...";
                     
-                    let batch = writeBatch(db);
-                    
-                    // Simpan kelas
                     for (const cName of importedClasses) {
                         const cId = `c_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-                        batch.set(doc(db, `${appId}_classes`, cId), { name: cName });
+                        await setDoc(doc(db, `${appId}_classes`, cId), { name: cName });
                     }
 
-                    // Simpan siswa (dibatasi 400 per kiriman agar server tidak kaget)
+                    // 2. Simpan Siswa (Satu per Satu) agar terlihat angkanya
+                    loadingTitle.innerText = "Mengirim Data Siswa";
+                    
                     for (let i = 0; i < importedStudents.length; i++) {
-                        const s = importedStudents[i];
-                        batch.set(doc(db, `${appId}_students`, s.id), s);
+                        // Update teks di layar
+                        loadingText.innerText = `Proses menyimpan: ${i + 1} dari ${importedStudents.length} siswa...`;
                         
-                        // Jika sudah mencapai 400 data, kita kirimkan dulu (Commit)
-                        if ((i + 1) % 400 === 0 || i === importedStudents.length - 1) {
-                            
-                            // MEMASANG BATAS WAKTU 15 DETIK (Agar tidak loading selamanya)
-                            const commitPromise = batch.commit();
-                            const timeoutPromise = new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error("Timeout! Firebase tidak merespon selama 15 detik.")), 15000)
-                            );
-                            
-                            await Promise.race([commitPromise, timeoutPromise]);
-                            
-                            // Siapkan truk baru untuk sisa data selanjutnya
-                            batch = writeBatch(db); 
-                        }
+                        const s = importedStudents[i];
+                        await setDoc(doc(db, `${appId}_students`, s.id), s);
                     }
 
-                    alert("Langkah 4: SUKSES BESAR! Data berhasil mendarat di Firebase.");
-                    await loadDataFromFirebase();
+                    alert("SUKSES BESAR! 100% Data berhasil mendarat di aplikasi Anda.");
+                    window.location.reload();
+                } else {
+                    alert("Koneksi ke Firebase belum siap. Coba refresh halaman.");
                 }
-
-                window.showToast("Hore! Data Excel berhasil masuk ke sistem!");
-                window.navigate('master');
             }
         } catch (err) {
-            // JIKA NYANGKUT, PESAN INI AKAN MUNCUL DAN MEMATIKAN LOADING SCREEN
-            alert("TERJADI KESALAHAN/MACET: \n" + err.message + "\n\nPastikan Anda sudah membuat Firestore Database di menu Build Firebase.");
-            console.error("Upload error:", err);
+            alert("Proses terhenti! Error: " + err.message);
+            console.error(err);
         } finally {
             document.getElementById('loading-screen').style.opacity = '0';
             setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 300);
@@ -997,20 +986,6 @@ window.handleExcelUpload = function(event) {
     };
     reader.readAsArrayBuffer(file);
 }
-
-    function renderRekap(container) {
-        container.innerHTML = `
-            <div class="glass-card p-8 rounded-2xl text-center">
-                <div class="w-20 h-20 bg-brand-50 text-brand-600 rounded-full flex items-center justify-center text-4xl mx-auto mb-4 border border-brand-100">
-                    <i class="ph-fill ph-wrench"></i>
-                </div>
-                <h3 class="font-display font-bold text-slate-800 text-xl mb-2">Modul Rekapitulasi Sedang Disiapkan</h3>
-                <p class="text-slate-500 max-w-md mx-auto text-sm">
-                    Fitur Export Laporan PDF dan Laporan Bulanan sedang dalam tahap finalisasi untuk menjamin standar pelaporan SMA Negeri 1 Basa Ampek Balai.
-                </p>
-            </div>
-        `;
-    }
 
     // Bootstrapping App dengan Sistem Multi-Role
     window.onload = () => {
