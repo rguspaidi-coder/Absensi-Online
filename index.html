@@ -896,23 +896,21 @@
         window.showToast("Template Excel berhasil diunduh");
     }
 
-    window.handleExcelUpload = function(event) {
+window.handleExcelUpload = function(event) {
     const file = event.target.files[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = async function(e) {
         try {
+            // DETEKTIF 1: Cek apakah Excel bisa dibaca
+            alert("Langkah 1: Membaca isi file Excel...");
+
             const data = new Uint8Array(e.target.result);
             const workbook = XLSX.read(data, {type: 'array'});
             const firstSheetName = workbook.SheetNames[0];
             const worksheet = workbook.Sheets[firstSheetName];
             const json = XLSX.utils.sheet_to_json(worksheet, {header: 1});
-
-            if (!json || json.length < 2) {
-                window.showToast("File Excel kosong atau format tidak valid.", "error");
-                return;
-            }
 
             const headers = json[0].map(h => String(h || '').toLowerCase().trim());
             const nisIdx = headers.indexOf('nis');
@@ -920,7 +918,7 @@
             const classIdx = headers.indexOf('kelas');
 
             if (nisIdx === -1 || nameIdx === -1 || classIdx === -1) {
-                window.showToast("Format Excel salah. Wajib ada kolom NIS, Nama, Kelas.", "error");
+                alert("GAGAL: Nama kolom di Excel tidak sesuai (harus ada NIS, Nama, Kelas).");
                 return;
             }
 
@@ -944,58 +942,53 @@
                 });
             }
 
-            if (importedStudents.length === 0) {
-                window.showToast("Tidak ada data valid dalam file.", "error");
-                return;
-            }
-
-            if(confirm(`Memproses ${importedStudents.length} siswa. Lanjutkan?`)) {
+            if(confirm(`Langkah 2: Ditemukan ${importedStudents.length} siswa di Excel. Kirim ke server sekarang?`)) {
                 document.getElementById('loading-screen').style.display = 'flex';
                 document.getElementById('loading-screen').style.opacity = '1';
                 
                 if (db) {
-                    // MENGGUNAKAN BATCH UNTUK UPLOAD MASSAL SUPER CEPAT
+                    alert("Langkah 3: Menyiapkan truk data untuk 1.000+ siswa... (Jika macet setelah pesan ini, berarti Firebase Anda menolak koneksi)");
+                    
                     let batch = writeBatch(db);
-                    let count = 0;
-                    const batchLimit = 400; // Batas aman pengiriman Firebase
-
-                    // 1. Simpan daftar kelas
+                    
+                    // Simpan kelas
                     for (const cName of importedClasses) {
                         const cId = `c_${Date.now()}_${Math.floor(Math.random()*1000)}`;
                         batch.set(doc(db, `${appId}_classes`, cId), { name: cName });
-                        count++;
                     }
 
-                    // 2. Simpan data siswa
-                    for (const s of importedStudents) {
+                    // Simpan siswa (dibatasi 400 per kiriman agar server tidak kaget)
+                    for (let i = 0; i < importedStudents.length; i++) {
+                        const s = importedStudents[i];
                         batch.set(doc(db, `${appId}_students`, s.id), s);
-                        count++;
                         
-                        // Kirim jika "truk" sudah penuh, lalu buat truk baru
-                        if (count >= batchLimit) {
-                            await batch.commit();
+                        // Jika sudah mencapai 400 data, kita kirimkan dulu (Commit)
+                        if ((i + 1) % 400 === 0 || i === importedStudents.length - 1) {
+                            
+                            // MEMASANG BATAS WAKTU 15 DETIK (Agar tidak loading selamanya)
+                            const commitPromise = batch.commit();
+                            const timeoutPromise = new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error("Timeout! Firebase tidak merespon selama 15 detik.")), 15000)
+                            );
+                            
+                            await Promise.race([commitPromise, timeoutPromise]);
+                            
+                            // Siapkan truk baru untuk sisa data selanjutnya
                             batch = writeBatch(db); 
-                            count = 0;
                         }
                     }
-                    
-                    // Kirim sisa data terakhir
-                    if (count > 0) {
-                        await batch.commit();
-                    }
 
-                    await loadDataFromFirebase(); // Tarik ulang data ke layar
-                } else {
-                    state.classes = Array.from(importedClasses).map((c, i) => ({id: `c_${i}`, name: c}));
-                    state.students = importedStudents;
+                    alert("Langkah 4: SUKSES BESAR! Data berhasil mendarat di Firebase.");
+                    await loadDataFromFirebase();
                 }
 
                 window.showToast("Hore! Data Excel berhasil masuk ke sistem!");
                 window.navigate('master');
             }
         } catch (err) {
+            // JIKA NYANGKUT, PESAN INI AKAN MUNCUL DAN MEMATIKAN LOADING SCREEN
+            alert("TERJADI KESALAHAN/MACET: \n" + err.message + "\n\nPastikan Anda sudah membuat Firestore Database di menu Build Firebase.");
             console.error("Upload error:", err);
-            window.showToast("Gagal menyimpan ke Firebase. Cek koneksi Anda.", "error");
         } finally {
             document.getElementById('loading-screen').style.opacity = '0';
             setTimeout(() => document.getElementById('loading-screen').style.display = 'none', 300);
